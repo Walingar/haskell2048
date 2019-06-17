@@ -11,12 +11,8 @@ import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MU
+import System.IO (BufferMode (..), hSetBuffering, stdin)
 import System.Random (newStdGen, randomRs)
-
-data GameState
-  = InProgress
-  | Lose
-  | Win
 
 data Move
   = TopMove
@@ -30,7 +26,6 @@ newtype Field =
 data GameData = GameData
   { field  :: Field
   , score  :: IORef Integer
-  , state  :: IORef GameState
   , logger :: Field -> IO ()
   }
 
@@ -77,6 +72,31 @@ isWin curField = checkPredicate curField (>= 2048)
 
 hasEmpty :: Field -> IO Bool
 hasEmpty curField = checkPredicate curField (== 0)
+
+isLose :: Field -> IO Bool
+isLose curField@(Field vector) = do
+  ans <- newIORef True
+  fieldHasEmpty <- hasEmpty curField
+  when fieldHasEmpty $ writeIORef ans False
+  forM_ [0 .. maxSize - 1] $ \i -> do
+    let row = vector V.! i
+    forM_ [0 .. maxSize - 1] $ \j -> do
+      el <- MU.read row j
+      when (j > 0) $ do
+        el' <- MU.read row (j - 1)
+        when (el == el') $ writeIORef ans False
+      when (j < maxSize - 1) $ do
+        el' <- MU.read row (j + 1)
+        when (el == el') $ writeIORef ans False
+      when (i > 0) $ do
+        let row' = vector V.! (i - 1)
+        el' <- MU.read row' j
+        when (el == el') $ writeIORef ans False
+      when (i < maxSize - 1) $ do
+        let row' = vector V.! (i + 1)
+        el' <- MU.read row' j
+        when (el == el') $ writeIORef ans False
+  readIORef ans
 
 slideRowLeft :: [Int] -> [Int]
 slideRowLeft [] = []
@@ -150,31 +170,36 @@ moveImpl LeftMove  = moveRows True
 
 move :: ReaderT GameData IO ()
 move = do
-  userAction <- lift getLine
+  userAction <- lift getChar
+  lift $ putStrLn ""
   case userAction of
-    "t" -> moveImpl TopMove
-    "r" -> moveImpl RightMove
-    "d" -> moveImpl DownMove
-    "l" -> moveImpl LeftMove
-    "s" -> undefined
-    _   -> error ("Unexpected user action: " ++ userAction)
+    'w' -> moveImpl TopMove
+    'd' -> moveImpl RightMove
+    's' -> moveImpl DownMove
+    'a' -> moveImpl LeftMove
+    'c' -> undefined
+    _   -> error ("Unexpected user action: " ++ show userAction)
 
 turn :: Bool -> ReaderT GameData IO ()
 turn newCell = do
-  GameData {field = curField, logger = curLogger, state = curStateRef} <- ask
-  curState <- lift $ readIORef curStateRef
-  case curState of
-    Win -> lift $ putStrLn "You win!"
-    Lose -> lift $ putStrLn "You lose! :("
-    InProgress -> do
-      canAddCell <- lift $ hasEmpty curField
-      when (newCell && canAddCell) newRandomCell
-      savedFieldList <- lift $ fieldToList curField
-      savedField <- lift $ toField savedFieldList
-      lift $ curLogger curField
-      move
-      eq <- lift $ equal savedField curField
-      turn (not eq)
+  GameData {field = curField, logger = curLogger} <- ask
+  curIsWin <- lift $ isWin curField
+  curIsLose <- lift $ isLose curField
+  when curIsWin $ do
+    lift $ putStrLn "You win!"
+    return ()
+  when curIsLose $ do
+    lift $ putStrLn "You lose! :("
+    return ()
+  when (not curIsWin && not curIsLose) $ do
+    canAddCell <- lift $ hasEmpty curField
+    when (newCell && canAddCell) newRandomCell
+    savedFieldList <- lift $ fieldToList curField
+    savedField <- lift $ toField savedFieldList
+    lift $ curLogger curField
+    move
+    eq <- lift $ equal savedField curField
+    turn (not eq)
 
 tuplify :: [a] -> (a, a)
 tuplify [x, y] = (x, y)
@@ -216,9 +241,7 @@ simpleLogger (Field vector) =
 
 startGame :: IO ()
 startGame = do
+  hSetBuffering stdin NoBuffering
   curScore <- newIORef 0 :: IO (IORef Integer)
   curField <- emptyField
-  curState <- newIORef InProgress
-  runReaderT
-    (turn True)
-    (GameData {field = curField, score = curScore, state = curState, logger = simpleLogger})
+  runReaderT (turn True) (GameData {field = curField, score = curScore, logger = simpleLogger})
