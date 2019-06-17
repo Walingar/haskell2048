@@ -11,7 +11,7 @@ import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MU
-import System.IO (BufferMode (..), IOMode (..), hSetBuffering, openFile, stdin)
+import System.IO (BufferMode (..), hSetBuffering, stdin)
 import System.Random (newStdGen, randomRs)
 
 data Move
