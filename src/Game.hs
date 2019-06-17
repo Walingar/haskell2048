@@ -25,8 +25,8 @@ newtype Field =
 
 data GameData = GameData
   { field  :: Field
-  , score  :: IORef Integer
-  , logger :: Field -> IO ()
+  , score  :: IORef Int
+  , logger :: GameData -> IO ()
   }
 
 maxSize :: Int
@@ -98,14 +98,23 @@ isLose curField@(Field vector) = do
         when (el == el') $ writeIORef ans False
   readIORef ans
 
-slideRowLeft :: [Int] -> [Int]
-slideRowLeft [] = []
-slideRowLeft [x] = [x]
-slideRowLeft (x:y:zs)
-  | x == 0 = slideRowLeft (y : zs) ++ [0]
-  | y == 0 = slideRowLeft (x : zs) ++ [0]
-  | x == y = (x + y) : slideRowLeft zs ++ [0]
-  | otherwise = x : slideRowLeft (y : zs)
+slideRowLeft :: [Int] -> IORef Int -> IO [Int]
+slideRowLeft [] _ = return []
+slideRowLeft [x] _ = return [x]
+slideRowLeft (x:y:zs) curScoreRef
+  | x == 0 = do
+    left <- slideRowLeft (y : zs) curScoreRef
+    return $ left ++ [0]
+  | y == 0 = do
+    left <- slideRowLeft (x : zs) curScoreRef
+    return $ left ++ [0]
+  | x == y = do
+    modifyIORef curScoreRef (\z -> z + x + y)
+    center <- slideRowLeft zs curScoreRef
+    return $ (x + y) : center ++ [0]
+  | otherwise = do
+    right <- slideRowLeft (y : zs) curScoreRef
+    return $ x : right
 
 vectorToList :: MU.IOVector Int -> IO [Int]
 vectorToList vector = do
@@ -134,14 +143,18 @@ fieldColumnToList (Field vector) j = do
 
 moveColumns :: Bool -> ReaderT GameData IO ()
 moveColumns toLeft = do
-  GameData {field = curField@(Field vector)} <- ask
+  GameData {field = curField@(Field vector), score = curScoreRef} <- ask
   lift $
     forM_ [0 .. maxSize - 1] $ \j -> do
       curColumn <- fieldColumnToList curField j
       movedColumn <-
         if toLeft
-          then toVector $ slideRowLeft curColumn
-          else toVector $ reverse $ slideRowLeft (reverse curColumn)
+          then do
+            slided <- slideRowLeft curColumn curScoreRef
+            toVector slided
+          else do
+            slided <- slideRowLeft (reverse curColumn) curScoreRef
+            toVector $ reverse slided
       forM_ [0 .. maxSize - 1] $ \i -> do
         let row = vector V.! i
         movedEl <- MU.read movedColumn i
@@ -149,15 +162,19 @@ moveColumns toLeft = do
 
 moveRows :: Bool -> ReaderT GameData IO ()
 moveRows toLeft = do
-  GameData {field = (Field curField)} <- ask
+  GameData {field = (Field curField), score = curScoreRef} <- ask
   lift $
     forM_ [0 .. maxSize - 1] $ \i -> do
       let row = curField V.! i
       curRow <- vectorToList row
       movedRow <-
         if toLeft
-          then toVector $ slideRowLeft curRow
-          else toVector $ reverse $ slideRowLeft (reverse curRow)
+          then do
+            slided <- slideRowLeft curRow curScoreRef
+            toVector slided
+          else do
+            slided <- slideRowLeft (reverse curRow) curScoreRef
+            toVector $ reverse slided
       forM_ [0 .. maxSize - 1] $ \j -> do
         movedEl <- MU.read movedRow j
         MU.write row j movedEl
@@ -182,7 +199,7 @@ move = do
 
 turn :: Bool -> ReaderT GameData IO ()
 turn newCell = do
-  GameData {field = curField, logger = curLogger} <- ask
+  curData@GameData {field = curField, logger = curLogger} <- ask
   curIsWin <- lift $ isWin curField
   curIsLose <- lift $ isLose curField
   when curIsWin $ do
@@ -196,7 +213,7 @@ turn newCell = do
     when (newCell && canAddCell) newRandomCell
     savedFieldList <- lift $ fieldToList curField
     savedField <- lift $ toField savedFieldList
-    lift $ curLogger curField
+    lift $ curLogger curData
     move
     eq <- lift $ equal savedField curField
     turn (not eq)
@@ -230,8 +247,10 @@ newRandomCell = do
     then MU.write row j randomCellValue
     else newRandomCell
 
-simpleLogger :: Field -> IO ()
-simpleLogger (Field vector) =
+simpleLogger :: GameData -> IO ()
+simpleLogger GameData {field = Field vector, score = curScoreRef} = do
+  curScore <- readIORef curScoreRef
+  putStrLn $ "Your score is " ++ show curScore
   forM_ [0 .. maxSize - 1] $ \i -> do
     let row = vector V.! i
     forM_ [0 .. maxSize - 1] $ \j -> do
@@ -242,6 +261,6 @@ simpleLogger (Field vector) =
 startGame :: IO ()
 startGame = do
   hSetBuffering stdin NoBuffering
-  curScore <- newIORef 0 :: IO (IORef Integer)
+  curScore <- newIORef 0 :: IO (IORef Int)
   curField <- emptyField
   runReaderT (turn True) (GameData {field = curField, score = curScore, logger = simpleLogger})
