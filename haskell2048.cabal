@@ -1,0 +1,42 @@
+name:                haskell2048
+version:             0.1.0.0
+synopsis:            Synopsis for 2048 game
+description:         Haskell implementation of 2048 game
+
+homepage:            https://github.com/Walingar/haskell2048
+license:             MIT
+license-file:        LICENSE
+author:              Rykunov Nikolay
+maintainer:          Walingar@mail.ru
+copyright:           2019 Rykunov Nikolay
+
+category:            Web
+build-type:          Simple
+extra-source-files:  README.md
+cabal-version:       >=1.10
+tested-with:         GHC == 8.0.1
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     Game
+                     , UI
+  ghc-options:         -Wall
+  build-depends:       base >= 4.9 && < 5
+  default-language:    Haskell2010
+
+executable game-2048
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
+  build-depends:       base
+                     , haskell2048
+  default-language:    Haskell2010
+
+test-suite test-game-2048
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+  build-depends:       base
+                     , haskell2048
+  ghc-options:         -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
+  default-language:    Haskell2010
