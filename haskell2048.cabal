@@ -22,6 +22,9 @@ library
                      , UI
   ghc-options:         -Wall
   build-depends:       base >= 4.9 && < 5
+                     , vector
+                     , mtl
+                     , random
   default-language:    Haskell2010
 
 executable game-2048
@@ -30,13 +33,4 @@ executable game-2048
   ghc-options:         -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
   build-depends:       base
                      , haskell2048
-  default-language:    Haskell2010
-
-test-suite test-game-2048
-  type:                exitcode-stdio-1.0
-  hs-source-dirs:      test
-  main-is:             Spec.hs
-  build-depends:       base
-                     , haskell2048
-  ghc-options:         -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010

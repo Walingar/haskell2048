@@ -2,7 +2,7 @@ module Main
   ( main
   ) where
 
-import Game (someFunc)
+import Game (startGame)
 
 main :: IO ()
-main = someFunc
+main = startGame
