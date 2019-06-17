@@ -11,7 +11,7 @@ import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MU
-import System.IO (BufferMode (..), hSetBuffering, stdin)
+import System.IO (BufferMode (..), IOMode (..), hSetBuffering, openFile, stdin)
 import System.Random (newStdGen, randomRs)
 
 data Move
@@ -194,8 +194,13 @@ move = do
     'd' -> moveImpl RightMove
     's' -> moveImpl DownMove
     'a' -> moveImpl LeftMove
-    'c' -> undefined
-    _   -> error ("Unexpected user action: " ++ show userAction)
+    'c' -> do
+      lift $ putStrLn "Game data has been saved!"
+      saveData
+    'l' -> do
+      lift $ putStrLn "Your data has been loaded!"
+      undefined
+    _ -> lift $ putStrLn ("Unexpected action: " ++ show userAction)
 
 turn :: Bool -> ReaderT GameData IO ()
 turn newCell = do
@@ -257,6 +262,24 @@ simpleLogger GameData {field = Field vector, score = curScoreRef} = do
       el <- MU.read row j
       putStr (show el ++ " ")
     putStrLn ""
+
+saveData :: ReaderT GameData IO ()
+saveData = do
+  curData <- ask
+  dataLog <- lift $ saveData' curData
+  lift $ writeFile "save" dataLog
+  where
+    saveData' :: GameData -> IO String
+    saveData' GameData {score = curScoreRef, field = Field curField} = do
+      curScore <- readIORef curScoreRef
+      res <- newIORef ""
+      modifyIORef res (\s -> s ++ "Score: " ++ show curScore ++ "\n")
+      forM_ [0 .. maxSize - 1] $ \i -> do
+        let row = curField V.! i
+        forM_ [0 .. maxSize - 1] $ \j -> do
+          el <- MU.read row j
+          modifyIORef res (\s -> concat [s, "Cell ", show i, " ", show j, ": ", show el, "\n"])
+      readIORef res
 
 startGame :: IO ()
 startGame = do
