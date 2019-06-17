@@ -7,14 +7,16 @@ module Game
 import Control.Monad (when)
 import Control.Monad.Reader (ReaderT, ask, lift, runReaderT)
 import Data.Foldable (forM_)
-import Data.IORef (IORef, newIORef)
+import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MU
 import System.Random (newStdGen, randomRs)
 
-data GameState =
-  InProgress
+data GameState
+  = InProgress
+  | Lose
+  | Win
 
 data Move
   = TopMove
@@ -32,6 +34,9 @@ data GameData = GameData
   , logger :: Field -> IO ()
   }
 
+maxSize :: Int
+maxSize = 4
+
 toVector :: [Int] -> IO (MU.IOVector Int)
 toVector list = VU.thaw $ VU.fromList list
 
@@ -42,47 +47,106 @@ toField list = do
 
 emptyField :: IO Field
 emptyField =
-  let line = replicate 5 0
-   in toField (replicate 5 line)
+  let line = replicate maxSize 0
+   in toField (replicate maxSize line)
 
-joinCell :: (Int, Int) -> (Int, Int) -> ReaderT GameData IO ()
-joinCell (x1, y1) (x2, y2) = do
-  GameData {field = Field curField} <- ask
-  let rowFrom = curField V.! x1
-  elFrom <- MU.read rowFrom y1
-  let rowTo = curField V.! x2
-  elTo <- MU.read rowTo y2
-  when (elTo == elFrom) $ do
-    MU.write rowFrom y1 0
-    MU.write rowTo y2 (2 * elTo)
-    return ()
-  when (elTo == 0) $ do
-    MU.write rowFrom y1 0
-    MU.write rowTo y2 elFrom
-    return ()
+equal :: Field -> Field -> IO Bool
+equal (Field a) (Field b) = do
+  ans <- newIORef True
+  forM_ [0 .. maxSize - 1] $ \i -> do
+    let rowA = a V.! i
+    let rowB = b V.! i
+    forM_ [0 .. maxSize - 1] $ \j -> do
+      elA <- MU.read rowA j
+      elB <- MU.read rowB j
+      when (elA /= elB) $ writeIORef ans False
+  readIORef ans
+
+checkPredicate :: Field -> (Int -> Bool) -> IO Bool
+checkPredicate (Field a) f = do
+  ans <- newIORef False
+  forM_ [0 .. maxSize - 1] $ \i -> do
+    let rowA = a V.! i
+    forM_ [0 .. maxSize - 1] $ \j -> do
+      elA <- MU.read rowA j
+      when (f elA) $ writeIORef ans True
+  readIORef ans
+
+isWin :: Field -> IO Bool
+isWin curField = checkPredicate curField (>= 2048)
+
+hasEmpty :: Field -> IO Bool
+hasEmpty curField = checkPredicate curField (== 0)
+
+slideRowLeft :: [Int] -> [Int]
+slideRowLeft [] = []
+slideRowLeft [x] = [x]
+slideRowLeft (x:y:zs)
+  | x == 0 = slideRowLeft (y : zs) ++ [0]
+  | y == 0 = slideRowLeft (x : zs) ++ [0]
+  | x == y = (x + y) : slideRowLeft zs ++ [0]
+  | otherwise = x : slideRowLeft (y : zs)
+
+vectorToList :: MU.IOVector Int -> IO [Int]
+vectorToList vector = do
+  immutableVector <- VU.freeze vector
+  return $ VU.toList immutableVector
+
+fieldToList :: Field -> IO [[Int]]
+fieldToList (Field vector) = do
+  res <- newIORef []
+  forM_ [0 .. maxSize - 1] $ \i -> do
+    let row = vector V.! i
+    el <- vectorToList row
+    modifyIORef res (\x -> el : x)
+  list <- readIORef res
+  return $ reverse list
+
+fieldColumnToList :: Field -> Int -> IO [Int]
+fieldColumnToList (Field vector) j = do
+  res <- newIORef []
+  forM_ [0 .. maxSize - 1] $ \i -> do
+    let row = vector V.! i
+    el <- MU.read row j
+    modifyIORef res (\x -> el : x)
+  list <- readIORef res
+  return $ reverse list
+
+moveColumns :: Bool -> ReaderT GameData IO ()
+moveColumns toLeft = do
+  GameData {field = curField@(Field vector)} <- ask
+  lift $
+    forM_ [0 .. maxSize - 1] $ \j -> do
+      curColumn <- fieldColumnToList curField j
+      movedColumn <-
+        if toLeft
+          then toVector $ slideRowLeft curColumn
+          else toVector $ reverse $ slideRowLeft (reverse curColumn)
+      forM_ [0 .. maxSize - 1] $ \i -> do
+        let row = vector V.! i
+        movedEl <- MU.read movedColumn i
+        MU.write row j movedEl
+
+moveRows :: Bool -> ReaderT GameData IO ()
+moveRows toLeft = do
+  GameData {field = (Field curField)} <- ask
+  lift $
+    forM_ [0 .. maxSize - 1] $ \i -> do
+      let row = curField V.! i
+      curRow <- vectorToList row
+      movedRow <-
+        if toLeft
+          then toVector $ slideRowLeft curRow
+          else toVector $ reverse $ slideRowLeft (reverse curRow)
+      forM_ [0 .. maxSize - 1] $ \j -> do
+        movedEl <- MU.read movedRow j
+        MU.write row j movedEl
 
 moveImpl :: Move -> ReaderT GameData IO ()
-moveImpl TopMove =
-  forM_ [1 .. 4] $ \i ->
-    forM_ [1 .. i] $ \moveCount ->
-      forM_ [0 .. 4] $ \j ->
-        joinCell (i - moveCount + 1, j) (i - moveCount, j)
-moveImpl RightMove =
-  forM_ [3,2 .. 0] $ \j ->
-    forM_ [1 .. (4 - j)] $ \moveCount ->
-      forM_ [0 .. 4] $ \i ->
-        joinCell (i, j + moveCount - 1) (i, j + moveCount)
-moveImpl DownMove =
-  forM_ [3,2 .. 0] $ \i ->
-    forM_ [1 .. (4 - i)] $ \moveCount ->
-      forM_ [0 .. 4] $ \j ->
-        joinCell (i + moveCount - 1, j) (i + moveCount, j)
-moveImpl LeftMove =
-  forM_ [1 .. 4] $ \j ->
-    forM_ [1 .. j] $ \moveCount ->
-      forM_ [0 .. 4] $ \i -> do
-        lift $ putStrLn (show (i, j - moveCount + 1) ++ " " ++ show (i, j - moveCount))
-        joinCell (i, j - moveCount + 1) (i, j - moveCount)
+moveImpl TopMove   = moveColumns True
+moveImpl RightMove = moveRows False
+moveImpl DownMove  = moveColumns False
+moveImpl LeftMove  = moveRows True
 
 move :: ReaderT GameData IO ()
 move = do
@@ -94,37 +158,58 @@ move = do
     "l" -> moveImpl LeftMove
     "s" -> undefined
     _   -> error ("Unexpected user action: " ++ userAction)
-  turn
 
-turn :: ReaderT GameData IO ()
-turn = do
-  GameData {field = curField, logger = curLogger} <- ask
-  newRandomCell
-  lift $ curLogger curField
-  move
+turn :: Bool -> ReaderT GameData IO ()
+turn newCell = do
+  GameData {field = curField, logger = curLogger, state = curStateRef} <- ask
+  curState <- lift $ readIORef curStateRef
+  case curState of
+    Win -> lift $ putStrLn "You win!"
+    Lose -> lift $ putStrLn "You lose! :("
+    InProgress -> do
+      canAddCell <- lift $ hasEmpty curField
+      when (newCell && canAddCell) newRandomCell
+      savedFieldList <- lift $ fieldToList curField
+      savedField <- lift $ toField savedFieldList
+      lift $ curLogger curField
+      move
+      eq <- lift $ equal savedField curField
+      turn (not eq)
 
 tuplify :: [a] -> (a, a)
 tuplify [x, y] = (x, y)
 tuplify _      = error "Expected list with 2 elements"
 
 randomCellId :: IO (Int, Int)
-randomCellId = fmap tuplify $ take 2 . randomRs (0, 4) <$> newStdGen
+randomCellId = fmap tuplify $ take 2 . randomRs (0, maxSize - 1) <$> newStdGen
+
+randomCell :: IO Int
+randomCell = do
+  randomCellProb <- randomCell'
+  return $
+    if randomCellProb <= 10
+      then 4
+      else 2
+  where
+    randomCell' :: IO Int
+    randomCell' = fmap head $ take 1 . randomRs (0, 100) <$> newStdGen
 
 newRandomCell :: ReaderT GameData IO ()
 newRandomCell = do
   GameData {field = (Field vector)} <- ask
+  randomCellValue <- lift randomCell
   (i, j) <- lift randomCellId
   let row = vector V.! i
   el <- MU.read row j
   if el == 0
-    then MU.write row j 2
+    then MU.write row j randomCellValue
     else newRandomCell
 
 simpleLogger :: Field -> IO ()
 simpleLogger (Field vector) =
-  forM_ [0 .. 4] $ \i -> do
+  forM_ [0 .. maxSize - 1] $ \i -> do
     let row = vector V.! i
-    forM_ [0 .. 4] $ \j -> do
+    forM_ [0 .. maxSize - 1] $ \j -> do
       el <- MU.read row j
       putStr (show el ++ " ")
     putStrLn ""
@@ -134,4 +219,6 @@ startGame = do
   curScore <- newIORef 0 :: IO (IORef Integer)
   curField <- emptyField
   curState <- newIORef InProgress
-  runReaderT turn (GameData {field = curField, score = curScore, state = curState, logger = simpleLogger})
+  runReaderT
+    (turn True)
+    (GameData {field = curField, score = curScore, state = curState, logger = simpleLogger})
