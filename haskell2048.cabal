@@ -25,6 +25,7 @@ library
                      , vector
                      , mtl
                      , random
+                     , megaparsec >= 7.0
   default-language:    Haskell2010
 
 executable game-2048
