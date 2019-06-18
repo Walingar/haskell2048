@@ -2,75 +2,23 @@
 
 module Game
   ( startGame
+  , moveImpl
+  , isWin
+  , isLose
   ) where
 
-import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Control.Monad.Reader (ReaderT, ask, lift, runReaderT)
 import Data.Foldable (forM_)
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
-import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MU
-import Data.Void (Void)
+import GameStructure (Field (..), GameData (..), Move (..), maxSize)
+import GameStructureUtil (checkPredicate, emptyField, equal, fieldColumnToList, fieldToList,
+                          toField, toVector, vectorToList)
+import SaveGameData (loadData, saveData)
 import System.IO (BufferMode (..), hSetBuffering, stdin)
 import System.Random (newStdGen, randomRs)
-import Text.Megaparsec (Parsec, eof, parse)
-import Text.Megaparsec.Char (char, digitChar, eol, space, string)
-import Text.Megaparsec.Error (errorBundlePretty)
-
-data Move
-  = TopMove
-  | LeftMove
-  | RightMove
-  | DownMove
-
-newtype Field =
-  Field (V.Vector (MU.IOVector Int))
-
-data GameData = GameData
-  { field  :: Field
-  , score  :: IORef Int
-  , logger :: GameData -> IO ()
-  }
-
-maxSize :: Int
-maxSize = 4
-
-toVector :: [Int] -> IO (MU.IOVector Int)
-toVector list = VU.thaw $ VU.fromList list
-
-toField :: [[Int]] -> IO Field
-toField list = do
-  lists <- traverse toVector list
-  return $ Field $ V.fromList lists
-
-emptyField :: IO Field
-emptyField =
-  let line = replicate maxSize 0
-   in toField (replicate maxSize line)
-
-equal :: Field -> Field -> IO Bool
-equal (Field a) (Field b) = do
-  ans <- newIORef True
-  forM_ [0 .. maxSize - 1] $ \i -> do
-    let rowA = a V.! i
-    let rowB = b V.! i
-    forM_ [0 .. maxSize - 1] $ \j -> do
-      elA <- MU.read rowA j
-      elB <- MU.read rowB j
-      when (elA /= elB) $ writeIORef ans False
-  readIORef ans
-
-checkPredicate :: Field -> (Int -> Bool) -> IO Bool
-checkPredicate (Field a) f = do
-  ans <- newIORef False
-  forM_ [0 .. maxSize - 1] $ \i -> do
-    let rowA = a V.! i
-    forM_ [0 .. maxSize - 1] $ \j -> do
-      elA <- MU.read rowA j
-      when (f elA) $ writeIORef ans True
-  readIORef ans
 
 isWin :: Field -> IO Bool
 isWin curField = checkPredicate curField (>= 2048)
@@ -120,31 +68,6 @@ slideRowLeft (x:y:zs) curScoreRef
   | otherwise = do
     right <- slideRowLeft (y : zs) curScoreRef
     return $ x : right
-
-vectorToList :: MU.IOVector Int -> IO [Int]
-vectorToList vector = do
-  immutableVector <- VU.freeze vector
-  return $ VU.toList immutableVector
-
-fieldToList :: Field -> IO [[Int]]
-fieldToList (Field vector) = do
-  res <- newIORef []
-  forM_ [0 .. maxSize - 1] $ \i -> do
-    let row = vector V.! i
-    el <- vectorToList row
-    modifyIORef res (\x -> el : x)
-  list <- readIORef res
-  return $ reverse list
-
-fieldColumnToList :: Field -> Int -> IO [Int]
-fieldColumnToList (Field vector) j = do
-  res <- newIORef []
-  forM_ [0 .. maxSize - 1] $ \i -> do
-    let row = vector V.! i
-    el <- MU.read row j
-    modifyIORef res (\x -> el : x)
-  list <- readIORef res
-  return $ reverse list
 
 moveColumns :: Bool -> ReaderT GameData IO ()
 moveColumns toLeft = do
@@ -267,85 +190,6 @@ simpleLogger GameData {field = Field vector, score = curScoreRef} = do
       el <- MU.read row j
       putStr (show el ++ " ")
     putStrLn ""
-
-saveData :: ReaderT GameData IO ()
-saveData = do
-  curData <- ask
-  dataLog <- lift $ saveData' curData
-  lift $ writeFile "save" dataLog
-  where
-    saveData' :: GameData -> IO String
-    saveData' GameData {score = curScoreRef, field = Field curField} = do
-      curScore <- readIORef curScoreRef
-      res <- newIORef ("Score: " ++ show curScore ++ "\n")
-      forM_ [0 .. maxSize - 1] $ \i -> do
-        let row = curField V.! i
-        forM_ [0 .. maxSize - 1] $ \j -> do
-          el <- MU.read row j
-          modifyIORef res (\s -> concat [s, "Cell ", show i, " ", show j, ": ", show el, "\n"])
-      readIORef res
-
-type Parser = Parsec Void String
-
-parseIntString :: Parser String
-parseIntString = do
-  ch <- fmap Left digitChar <|> fmap Right (pure ())
-  case ch of
-    Left dgt -> do
-      suffix <- parseIntString
-      return $ dgt : suffix
-    Right _ -> return []
-
-parseScore :: Parser Int
-parseScore = do
-  i <- string "Score:" *> space *> parseIntString
-  _ <- eol
-  return $ read i
-
-parseCell :: Parser (Int, Int, Int)
-parseCell = do
-  i <- string "Cell" *> space *> parseIntString
-  j <- space *> parseIntString
-  el <- char ':' *> space *> parseIntString
-  _ <- eol
-  return (read i, read j, read el)
-
-parseCells :: Parser [(Int, Int, Int)]
-parseCells = do
-  line <- fmap Left parseCell <|> fmap Right eof
-  case line of
-    Left cell -> do
-      parsedTail <- parseCells
-      return $ cell : parsedTail
-    Right _ -> return []
-
-data ParsedData = ParsedData
-  { parsedField :: [(Int, Int, Int)]
-  , parsedScore :: Int
-  }
-
-parseData :: Parser ParsedData
-parseData = do
-  curScore <- parseScore
-  curField <- parseCells
-  return $ ParsedData {parsedField = curField, parsedScore = curScore}
-
-copyLoadedField :: [(Int, Int, Int)] -> Field -> IO ()
-copyLoadedField [] _ = return ()
-copyLoadedField ((i, j, el):xs) curField@(Field vector) = do
-  let row = vector V.! i
-  MU.write row j el
-  copyLoadedField xs curField
-
-loadData :: ReaderT GameData IO ()
-loadData = do
-  input <- lift $ readFile "save"
-  case parse parseData "parse_log" input of
-    Left err -> lift $ putStrLn $ errorBundlePretty err
-    Right ParsedData {parsedField = curParsedField, parsedScore = curScore} -> do
-      GameData {score = curScoreRef, field = curField} <- ask
-      lift $ writeIORef curScoreRef curScore
-      lift $ copyLoadedField curParsedField curField
 
 startGame :: IO ()
 startGame = do
