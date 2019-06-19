@@ -14,9 +14,15 @@ import Graphics.Gloss (Display (..))
 import Graphics.Gloss.Data.Bitmap (loadBMP)
 import Graphics.Gloss.Data.Color (Color, makeColorI)
 import Graphics.Gloss.Data.Picture (Picture (..), pictures, scale, translate)
-import Graphics.Gloss.Interface.IO.Game (Event (..), Key (..), KeyState (..), playIO)
+import Graphics.Gloss.Interface.IO.Interact (Controller, Event (..), Key (..), KeyState (..),
+                                             interactIO)
 import SaveGameData (loadData, saveData)
 import System.Exit (exitSuccess)
+
+data MemoizedData = MemoizedData
+  { gameData' :: GameData
+  , picture'  :: Picture
+  }
 
 window :: Display
 window = InWindow "2048" (500, 500) (0, 0)
@@ -30,8 +36,8 @@ scaledText s = scale 0.2 0.2 $ Text s
 scorePicture :: Int -> Picture
 scorePicture x = translate (-75) 160 $ scaledText $ "Score: " ++ show x
 
-render :: GameData -> IO Picture
-render GameData {score = curScoreRef, field = Field vector, gameState = curGameStateRef} = do
+render' :: GameData -> IO Picture
+render' GameData {score = curScoreRef, field = Field vector, gameState = curGameStateRef} = do
   curGameState <- readIORef curGameStateRef
   curScore <- readIORef curScoreRef
   picturesListRef <- newIORef [scorePicture curScore]
@@ -54,35 +60,53 @@ render GameData {score = curScoreRef, field = Field vector, gameState = curGameS
   picturesList <- readIORef picturesListRef
   return $ pictures picturesList
 
-frame :: Float -> GameData -> IO GameData
-frame _ = return
+generateMemoizedData :: GameData -> IO MemoizedData
+generateMemoizedData gameData = do
+  curPicture <- render' gameData
+  return $ MemoizedData {gameData' = gameData, picture' = curPicture}
 
-gameImpl :: Move -> GameData -> IO GameData
-gameImpl move gameData = do
+gameImpl :: Move -> MemoizedData -> IO MemoizedData
+gameImpl move MemoizedData {gameData' = gameData} = do
   runReaderT (turn move) gameData
-  return gameData
+  generateMemoizedData gameData
 
-game :: Event -> GameData -> IO GameData
+game :: Event -> MemoizedData -> IO MemoizedData
 game (EventKey (Char 'w') Down _ _) gameData = gameImpl UpMove gameData
 game (EventKey (Char 'a') Down _ _) gameData = gameImpl LeftMove gameData
 game (EventKey (Char 's') Down _ _) gameData = gameImpl DownMove gameData
 game (EventKey (Char 'd') Down _ _) gameData = gameImpl RightMove gameData
-game (EventKey (Char 'l') Down _ _) gameData = do
+game (EventKey (Char 'l') Down _ _) MemoizedData {gameData' = gameData} = do
   loadedData <- loadData gameData
   putStrLn "Game data has been loaded!"
-  return loadedData
-game (EventKey (Char 'c') Down _ _) gameData = do
+  generateMemoizedData loadedData
+game (EventKey (Char 'c') Down _ _) memoizedData@MemoizedData {gameData' = gameData} = do
   saveData gameData
   putStrLn "Game data has been saved!"
-  return gameData
+  return memoizedData
 game (EventKey (Char 'q') Down _ _) _ = exitSuccess
-game (EventKey (Char 'r') Down _ _) _ = initGameData simpleLogger
+game (EventKey (Char 'r') Down _ _) _ = do
+  newGameData <- initGameData simpleLogger
+  curPicture <- render' newGameData
+  return $ MemoizedData {picture' = curPicture, gameData' = newGameData}
 game _ gameData = return gameData
+
+render :: MemoizedData -> IO Picture
+render MemoizedData {picture' = curPicture} = return curPicture
 
 bgColor :: Color
 bgColor = makeColorI 187 173 162 1
 
+f :: Controller -> IO ()
+f _ = return ()
+
 draw :: IO ()
 draw = do
   curGameData <- initGameData simpleLogger
-  playIO window bgColor 60 curGameData render game frame
+  curPicture <- render' curGameData
+  interactIO
+    window
+    bgColor
+    (MemoizedData {gameData' = curGameData, picture' = curPicture})
+    render
+    game
+    f
