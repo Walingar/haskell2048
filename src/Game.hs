@@ -147,12 +147,6 @@ turn move = do
     _ -> return ()
 
 simpleLogger :: GameData -> IO ()
-simpleLogger GameData {field = Field vector, score = curScoreRef} = do
+simpleLogger GameData {score = curScoreRef} = do
   curScore <- readIORef curScoreRef
   putStrLn $ "Your score is " ++ show curScore
-  forM_ [0 .. maxSize - 1] $ \i -> do
-    let row = vector V.! i
-    forM_ [0 .. maxSize - 1] $ \j -> do
-      el <- MU.read row j
-      putStr (show el ++ " ")
-    putStrLn ""
