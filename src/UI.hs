@@ -5,6 +5,7 @@ module UI
 import Control.Monad (forM_)
 import Control.Monad.Reader (runReaderT)
 import Data.IORef (modifyIORef, newIORef, readIORef)
+import qualified Data.Map.Strict as MP
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed.Mutable as MU
 import Game (simpleLogger, turn)
@@ -22,6 +23,7 @@ import System.Exit (exitSuccess)
 data MemoizedData = MemoizedData
   { gameData' :: GameData
   , picture'  :: Picture
+  , images    :: MP.Map Int Picture
   }
 
 window :: Display
@@ -36,8 +38,8 @@ scaledText s = scale 0.2 0.2 $ Text s
 scorePicture :: Int -> Picture
 scorePicture x = translate (-75) 160 $ scaledText $ "Score: " ++ show x
 
-render' :: GameData -> IO Picture
-render' GameData {score = curScoreRef, field = Field vector, gameState = curGameStateRef} = do
+render' :: GameData -> MP.Map Int Picture -> IO Picture
+render' GameData {score = curScoreRef, field = Field vector, gameState = curGameStateRef} curImages = do
   curGameState <- readIORef curGameStateRef
   curScore <- readIORef curScoreRef
   picturesListRef <- newIORef [scorePicture curScore]
@@ -45,7 +47,7 @@ render' GameData {score = curScoreRef, field = Field vector, gameState = curGame
     let row = vector V.! i
     forM_ [0 .. maxSize - 1] $ \j -> do
       el <- MU.read row j
-      curPictureRaw <- loadBMP $ getImgName el
+      let curPictureRaw = curImages MP.! el
       let curPicture =
             scale 0.5 0.5 $
             translate
@@ -60,34 +62,34 @@ render' GameData {score = curScoreRef, field = Field vector, gameState = curGame
   picturesList <- readIORef picturesListRef
   return $ pictures picturesList
 
-generateMemoizedData :: GameData -> IO MemoizedData
-generateMemoizedData gameData = do
-  curPicture <- render' gameData
-  return $ MemoizedData {gameData' = gameData, picture' = curPicture}
+generateMemoizedData :: GameData -> MP.Map Int Picture -> IO MemoizedData
+generateMemoizedData gameData curImages = do
+  curPicture <- render' gameData curImages
+  return $ MemoizedData {gameData' = gameData, picture' = curPicture, images = curImages}
 
 gameImpl :: Move -> MemoizedData -> IO MemoizedData
-gameImpl move MemoizedData {gameData' = gameData} = do
+gameImpl move MemoizedData {gameData' = gameData, images = curImages} = do
   runReaderT (turn move) gameData
-  generateMemoizedData gameData
+  generateMemoizedData gameData curImages
 
 game :: Event -> MemoizedData -> IO MemoizedData
 game (EventKey (Char 'w') Down _ _) gameData = gameImpl UpMove gameData
 game (EventKey (Char 'a') Down _ _) gameData = gameImpl LeftMove gameData
 game (EventKey (Char 's') Down _ _) gameData = gameImpl DownMove gameData
 game (EventKey (Char 'd') Down _ _) gameData = gameImpl RightMove gameData
-game (EventKey (Char 'l') Down _ _) MemoizedData {gameData' = gameData} = do
+game (EventKey (Char 'l') Down _ _) MemoizedData {gameData' = gameData, images = curImages} = do
   loadedData <- loadData gameData
   putStrLn "Game data has been loaded!"
-  generateMemoizedData loadedData
+  generateMemoizedData loadedData curImages
 game (EventKey (Char 'c') Down _ _) memoizedData@MemoizedData {gameData' = gameData} = do
   saveData gameData
   putStrLn "Game data has been saved!"
   return memoizedData
 game (EventKey (Char 'q') Down _ _) _ = exitSuccess
-game (EventKey (Char 'r') Down _ _) _ = do
+game (EventKey (Char 'r') Down _ _) MemoizedData {images = curImages} = do
   newGameData <- initGameData simpleLogger
-  curPicture <- render' newGameData
-  return $ MemoizedData {picture' = curPicture, gameData' = newGameData}
+  curPicture <- render' newGameData curImages
+  return $ MemoizedData {picture' = curPicture, gameData' = newGameData, images = curImages}
 game _ gameData = return gameData
 
 render :: MemoizedData -> IO Picture
@@ -99,14 +101,28 @@ bgColor = makeColorI 187 173 162 1
 f :: Controller -> IO ()
 f _ = return ()
 
+pow2' :: Int -> Int
+pow2' 0 = 0
+pow2' x = 2 ^ x
+
+getImages :: IO (MP.Map Int Picture)
+getImages = do
+  curImagesRef <- newIORef MP.empty
+  forM_ [0 .. 11] $ \i -> do
+    let el = pow2' i
+    curPictureRaw <- loadBMP $ getImgName el
+    modifyIORef curImagesRef (MP.insert el curPictureRaw)
+  readIORef curImagesRef
+
 draw :: IO ()
 draw = do
   curGameData <- initGameData simpleLogger
-  curPicture <- render' curGameData
+  curImages <- getImages
+  curPicture <- render' curGameData curImages
   interactIO
     window
     bgColor
-    (MemoizedData {gameData' = curGameData, picture' = curPicture})
+    (MemoizedData {gameData' = curGameData, picture' = curPicture, images = curImages})
     render
     game
     f

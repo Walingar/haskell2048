@@ -25,6 +25,7 @@ library
                      , SaveGameData
   ghc-options:         -Wall
   build-depends:       base >= 4.9 && < 5
+                     , containers
                      , vector
                      , mtl
                      , random

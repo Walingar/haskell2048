@@ -9,7 +9,7 @@ import Data.IORef (modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed.Mutable as MU
 import Data.Void (Void)
-import GameStructure (Field (..), GameData (..), maxSize)
+import GameStructure (Field (..), GameData (..), GameState (..), maxSize)
 import Text.Megaparsec (Parsec, eof, parse)
 import Text.Megaparsec.Char (char, digitChar, eol, space, string)
 import Text.Megaparsec.Error (errorBundlePretty)
@@ -83,11 +83,12 @@ copyLoadedField ((i, j, el):xs) curField@(Field vector) = do
   copyLoadedField xs curField
 
 loadData :: GameData -> IO GameData
-loadData curGameData@GameData {score = curScoreRef, field = curField} = do
+loadData curGameData@GameData {score = curScoreRef, field = curField, gameState = curGameState} = do
   input <- readFile "save"
   case parse parseData "parse_log" input of
     Left err -> putStrLn $ errorBundlePretty err
     Right ParsedData {parsedField = curParsedField, parsedScore = curScore} -> do
       writeIORef curScoreRef curScore
       copyLoadedField curParsedField curField
+      writeIORef curGameState InProgress
   return curGameData
