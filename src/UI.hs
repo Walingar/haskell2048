@@ -4,10 +4,10 @@ module UI
 
 import Control.Monad (forM_)
 import Control.Monad.Reader (runReaderT)
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed.Mutable as MU
-import Game (moveImpl, simpleLogger, turn)
+import Game (simpleLogger, turn)
 import GameStructure (Field (..), GameData (..), Move (..), maxSize)
 import GameStructureUtil (emptyField)
 import Graphics.Gloss (Display (..))
