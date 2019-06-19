@@ -2,6 +2,7 @@ module GameStructure
   ( Move(..)
   , Field(..)
   , GameData(..)
+  , GameState(..)
   , maxSize
   ) where
 
@@ -15,6 +16,11 @@ data Move
   | RightMove
   | DownMove
 
+data GameState
+  = InProgress
+  | Win
+  | Lose
+
 newtype Field =
   Field (V.Vector (MU.IOVector Int))
 
@@ -23,6 +29,7 @@ data GameData = GameData
   , score        :: IORef Int
   , logger       :: GameData -> IO ()
   , newCellCount :: IORef Int
+  , gameState    :: IORef GameState
   }
 
 maxSize :: Int

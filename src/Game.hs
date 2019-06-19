@@ -14,7 +14,7 @@ import Data.Foldable (forM_)
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed.Mutable as MU
-import GameStructure (Field (..), GameData (..), Move (..), maxSize)
+import GameStructure (Field (..), GameData (..), GameState (..), Move (..), maxSize)
 import GameStructureUtil (checkPredicate, equal, fieldColumnToList, fieldToList, newRandomCell,
                           toField, toVector, vectorToList)
 
@@ -113,28 +113,38 @@ moveImpl LeftMove  = moveRows True
 
 turn :: Move -> ReaderT GameData IO ()
 turn move = do
-  curData@GameData {field = curField, logger = curLogger, newCellCount = newCellCountRef} <- ask
-  curNewCellCount <- lift $ readIORef newCellCountRef
-  curIsWin <- lift $ isWin curField
-  curIsLose <- lift $ isLose curField
-  when curIsWin $ do
-    lift $ putStrLn "You win!"
-    return ()
-  when curIsLose $ do
-    lift $ putStrLn "You lose! :("
-    return ()
-  when (not curIsWin && not curIsLose) $ do
-    canAddCell <- lift $ hasEmpty curField
-    lift $ forM_ [1 .. curNewCellCount] $ \_ -> when canAddCell (newRandomCell curField)
-    savedFieldList <- lift $ fieldToList curField
-    savedField <- lift $ toField savedFieldList
-    lift $ curLogger curData
-    moveImpl move
-    eq <- lift $ equal savedField curField
-    lift $
-      if eq
-        then writeIORef newCellCountRef 0
-        else writeIORef newCellCountRef 1
+  curData@GameData { field = curField
+                   , logger = curLogger
+                   , newCellCount = newCellCountRef
+                   , gameState = curGameStateRef
+                   } <- ask
+  curGameState <- lift $ readIORef curGameStateRef
+  case curGameState of
+    InProgress -> do
+      curNewCellCount <- lift $ readIORef newCellCountRef
+      curIsWin <- lift $ isWin curField
+      curIsLose <- lift $ isLose curField
+      when curIsWin $ do
+        lift $ putStrLn "You win!"
+        lift $ writeIORef curGameStateRef Win
+        return ()
+      when curIsLose $ do
+        lift $ putStrLn "You lose! :("
+        lift $ writeIORef curGameStateRef Lose
+        return ()
+      when (not curIsWin && not curIsLose) $ do
+        canAddCell <- lift $ hasEmpty curField
+        lift $ forM_ [1 .. curNewCellCount] $ \_ -> when canAddCell (newRandomCell curField)
+        savedFieldList <- lift $ fieldToList curField
+        savedField <- lift $ toField savedFieldList
+        lift $ curLogger curData
+        moveImpl move
+        eq <- lift $ equal savedField curField
+        lift $
+          if eq
+            then writeIORef newCellCountRef 0
+            else writeIORef newCellCountRef 1
+    _ -> return ()
 
 simpleLogger :: GameData -> IO ()
 simpleLogger GameData {field = Field vector, score = curScoreRef} = do

@@ -4,7 +4,6 @@ module SaveGameData
   ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad.Reader (ReaderT, ask, lift)
 import Data.Foldable (forM_)
 import Data.IORef (modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
@@ -15,11 +14,10 @@ import Text.Megaparsec (Parsec, eof, parse)
 import Text.Megaparsec.Char (char, digitChar, eol, space, string)
 import Text.Megaparsec.Error (errorBundlePretty)
 
-saveData :: ReaderT GameData IO ()
-saveData = do
-  curData <- ask
-  dataLog <- lift $ saveData' curData
-  lift $ writeFile "save" dataLog
+saveData :: GameData -> IO ()
+saveData curData = do
+  dataLog <- saveData' curData
+  writeFile "save" dataLog
   where
     saveData' :: GameData -> IO String
     saveData' GameData {score = curScoreRef, field = Field curField} = do
@@ -84,12 +82,12 @@ copyLoadedField ((i, j, el):xs) curField@(Field vector) = do
   MU.write row j el
   copyLoadedField xs curField
 
-loadData :: ReaderT GameData IO ()
-loadData = do
-  input <- lift $ readFile "save"
+loadData :: GameData -> IO GameData
+loadData curGameData@GameData {score = curScoreRef, field = curField} = do
+  input <- readFile "save"
   case parse parseData "parse_log" input of
-    Left err -> lift $ putStrLn $ errorBundlePretty err
+    Left err -> putStrLn $ errorBundlePretty err
     Right ParsedData {parsedField = curParsedField, parsedScore = curScore} -> do
-      GameData {score = curScoreRef, field = curField} <- ask
-      lift $ writeIORef curScoreRef curScore
-      lift $ copyLoadedField curParsedField curField
+      writeIORef curScoreRef curScore
+      copyLoadedField curParsedField curField
+  return curGameData

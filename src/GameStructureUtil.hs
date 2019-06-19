@@ -8,15 +8,16 @@ module GameStructureUtil
   , fieldToList
   , fieldColumnToList
   , newRandomCell
+  , initGameData
   ) where
 
 import Control.Monad (when)
 import Data.Foldable (forM_)
-import Data.IORef (modifyIORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MU
-import GameStructure (Field (..), maxSize)
+import GameStructure (Field (..), GameData (..), GameState (..), maxSize)
 import System.Random (newStdGen, randomRs)
 
 toVector :: [Int] -> IO (MU.IOVector Int)
@@ -109,3 +110,18 @@ newRandomCell curField@(Field vector) = do
   if el == 0
     then MU.write row j randomCellValue
     else newRandomCell curField
+
+initGameData :: (GameData -> IO ()) -> IO GameData
+initGameData curLogger = do
+  curScore <- newIORef 0 :: IO (IORef Int)
+  curNewCellCount <- newIORef 2 :: IO (IORef Int)
+  curGameState <- newIORef InProgress
+  curField <- emptyField
+  return
+    GameData
+      { field = curField
+      , score = curScore
+      , logger = curLogger
+      , newCellCount = curNewCellCount
+      , gameState = curGameState
+      }
