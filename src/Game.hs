@@ -1,24 +1,22 @@
 {-# LANGUAGE InstanceSigs #-}
 
 module Game
-  ( startGame
-  , moveImpl
+  ( moveImpl
   , isWin
   , isLose
+  , simpleLogger
+  , turn
   ) where
 
 import Control.Monad (when)
-import Control.Monad.Reader (ReaderT, ask, lift, runReaderT)
+import Control.Monad.Reader (ReaderT, ask, lift)
 import Data.Foldable (forM_)
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed.Mutable as MU
 import GameStructure (Field (..), GameData (..), Move (..), maxSize)
-import GameStructureUtil (checkPredicate, emptyField, equal, fieldColumnToList, fieldToList,
+import GameStructureUtil (checkPredicate, equal, fieldColumnToList, fieldToList, newRandomCell,
                           toField, toVector, vectorToList)
-import SaveGameData (loadData, saveData)
-import System.IO (BufferMode (..), hSetBuffering, stdin)
-import System.Random (newStdGen, randomRs)
 
 isWin :: Field -> IO Bool
 isWin curField = checkPredicate curField (>= 2048)
@@ -108,31 +106,15 @@ moveRows toLeft = do
         MU.write row j movedEl
 
 moveImpl :: Move -> ReaderT GameData IO ()
-moveImpl TopMove   = moveColumns True
+moveImpl UpMove    = moveColumns True
 moveImpl RightMove = moveRows False
 moveImpl DownMove  = moveColumns False
 moveImpl LeftMove  = moveRows True
 
-move :: ReaderT GameData IO ()
-move = do
-  userAction <- lift getChar
-  lift $ putStrLn ""
-  case userAction of
-    'w' -> moveImpl TopMove
-    'd' -> moveImpl RightMove
-    's' -> moveImpl DownMove
-    'a' -> moveImpl LeftMove
-    'c' -> do
-      saveData
-      lift $ putStrLn "Game data has been saved!"
-    'l' -> do
-      loadData
-      lift $ putStrLn "Your data has been loaded!"
-    _ -> lift $ putStrLn ("Unexpected action: " ++ show userAction)
-
-turn :: Bool -> ReaderT GameData IO ()
-turn newCell = do
-  curData@GameData {field = curField, logger = curLogger} <- ask
+turn :: Move -> ReaderT GameData IO ()
+turn move = do
+  curData@GameData {field = curField, logger = curLogger, newCellCount = newCellCountRef} <- ask
+  curNewCellCount <- lift $ readIORef newCellCountRef
   curIsWin <- lift $ isWin curField
   curIsLose <- lift $ isLose curField
   when curIsWin $ do
@@ -143,42 +125,16 @@ turn newCell = do
     return ()
   when (not curIsWin && not curIsLose) $ do
     canAddCell <- lift $ hasEmpty curField
-    when (newCell && canAddCell) newRandomCell
+    lift $ forM_ [1 .. curNewCellCount] $ \_ -> when canAddCell (newRandomCell curField)
     savedFieldList <- lift $ fieldToList curField
     savedField <- lift $ toField savedFieldList
     lift $ curLogger curData
-    move
+    moveImpl move
     eq <- lift $ equal savedField curField
-    turn (not eq)
-
-tuplify :: [a] -> (a, a)
-tuplify [x, y] = (x, y)
-tuplify _      = error "Expected list with 2 elements"
-
-randomCellId :: IO (Int, Int)
-randomCellId = fmap tuplify $ take 2 . randomRs (0, maxSize - 1) <$> newStdGen
-
-randomCell :: IO Int
-randomCell = do
-  randomCellProb <- randomCell'
-  return $
-    if randomCellProb <= 10
-      then 4
-      else 2
-  where
-    randomCell' :: IO Int
-    randomCell' = fmap head $ take 1 . randomRs (0, 100) <$> newStdGen
-
-newRandomCell :: ReaderT GameData IO ()
-newRandomCell = do
-  GameData {field = (Field vector)} <- ask
-  randomCellValue <- lift randomCell
-  (i, j) <- lift randomCellId
-  let row = vector V.! i
-  el <- MU.read row j
-  if el == 0
-    then MU.write row j randomCellValue
-    else newRandomCell
+    lift $
+      if eq
+        then writeIORef newCellCountRef 0
+        else writeIORef newCellCountRef 1
 
 simpleLogger :: GameData -> IO ()
 simpleLogger GameData {field = Field vector, score = curScoreRef} = do
@@ -190,10 +146,3 @@ simpleLogger GameData {field = Field vector, score = curScoreRef} = do
       el <- MU.read row j
       putStr (show el ++ " ")
     putStrLn ""
-
-startGame :: IO ()
-startGame = do
-  hSetBuffering stdin NoBuffering
-  curScore <- newIORef 0 :: IO (IORef Int)
-  curField <- emptyField
-  runReaderT (turn True) (GameData {field = curField, score = curScore, logger = simpleLogger})

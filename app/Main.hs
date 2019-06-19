@@ -2,7 +2,7 @@ module Main
   ( main
   ) where
 
-import Game (startGame)
+import UI (draw)
 
 main :: IO ()
-main = startGame
+main = draw

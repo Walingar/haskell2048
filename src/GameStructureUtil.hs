@@ -7,15 +7,17 @@ module GameStructureUtil
   , vectorToList
   , fieldToList
   , fieldColumnToList
+  , newRandomCell
   ) where
 
 import Control.Monad (when)
 import Data.Foldable (forM_)
-import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef)
+import Data.IORef (modifyIORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Unboxed.Mutable as MU
 import GameStructure (Field (..), maxSize)
+import System.Random (newStdGen, randomRs)
 
 toVector :: [Int] -> IO (MU.IOVector Int)
 toVector list = VU.thaw $ VU.fromList list
@@ -26,9 +28,12 @@ toField list = do
   return $ Field $ V.fromList lists
 
 emptyField :: IO Field
-emptyField =
+emptyField = do
   let line = replicate maxSize 0
-   in toField (replicate maxSize line)
+  curField <- toField (replicate maxSize line)
+  newRandomCell curField
+  newRandomCell curField
+  return curField
 
 equal :: Field -> Field -> IO Bool
 equal (Field a) (Field b) = do
@@ -76,3 +81,31 @@ fieldColumnToList (Field vector) j = do
     modifyIORef res (\x -> el : x)
   list <- readIORef res
   return $ reverse list
+
+tuplify :: [a] -> (a, a)
+tuplify [x, y] = (x, y)
+tuplify _      = error "Expected list with 2 elements"
+
+randomCellId :: IO (Int, Int)
+randomCellId = fmap tuplify $ take 2 . randomRs (0, maxSize - 1) <$> newStdGen
+
+randomCell :: IO Int
+randomCell = do
+  randomCellProb <- randomCell'
+  return $
+    if randomCellProb <= 10
+      then 4
+      else 2
+  where
+    randomCell' :: IO Int
+    randomCell' = fmap head $ take 1 . randomRs (0, 100) <$> newStdGen
+
+newRandomCell :: Field -> IO ()
+newRandomCell curField@(Field vector) = do
+  randomCellValue <- randomCell
+  (i, j) <- randomCellId
+  let row = vector V.! i
+  el <- MU.read row j
+  if el == 0
+    then MU.write row j randomCellValue
+    else newRandomCell curField
