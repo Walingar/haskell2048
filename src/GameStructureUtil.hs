@@ -117,11 +117,13 @@ initGameData curLogger = do
   curNewCellCount <- newIORef 2 :: IO (IORef Int)
   curGameState <- newIORef InProgress
   curField <- emptyField
-  return
-    GameData
-      { field = curField
-      , score = curScore
-      , logger = curLogger
-      , newCellCount = curNewCellCount
-      , gameState = curGameState
-      }
+  let curGameData =
+        GameData
+          { field = curField
+          , score = curScore
+          , logger = curLogger
+          , newCellCount = curNewCellCount
+          , gameState = curGameState
+          }
+  curLogger curGameData
+  return curGameData

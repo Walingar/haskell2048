@@ -137,8 +137,8 @@ turn move = do
         lift $ forM_ [1 .. curNewCellCount] $ \_ -> when canAddCell (newRandomCell curField)
         savedFieldList <- lift $ fieldToList curField
         savedField <- lift $ toField savedFieldList
-        lift $ curLogger curData
         moveImpl move
+        lift $ curLogger curData
         eq <- lift $ equal savedField curField
         lift $
           if eq
